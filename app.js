@@ -115,18 +115,31 @@ snap.addEventListener('click', async () => {
 
     try {
         if (canFlash) {
-            await videoTrack.applyConstraints({ advanced: [{ torch: true }] });
-            await new Promise(resolve => setTimeout(resolve, 300));
+            await videoTrack.applyConstraints({ 
+                advanced: [{ 
+                    torch: true,
+                    // Force the focus to be as sharp as possible
+                    focusMode: "continuous" 
+                }] 
+            });
+            // 500ms allows the sensor to settle and focus after the flash hits
+            await new Promise(resolve => setTimeout(resolve, 500));
         }
 
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        canvas.getContext('2d').drawImage(video, 0, 0);
-        currentPhoto = canvas.toDataURL('image/jpeg', 0.9);
+        const ctx = canvas.getContext('2d');
+        
+        // --- THE CLARITY SECRET SAUCE ---
+        // We apply a filter to the canvas to mimic a real scanner
+        ctx.filter = 'contrast(1.4) brightness(1.1) grayscale(1)';
+        ctx.drawImage(video, 0, 0);
+        
+        currentPhoto = canvas.toDataURL('image/jpeg', 1.0); // Maximum quality (1.0)
 
         if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
 
-        status.innerText = "Scanning...";
+        status.innerText = "Processing High-Contrast Scan...";
         const { data: { text } } = await Tesseract.recognize(currentPhoto, 'eng');
         processSummary(text);
 
@@ -206,3 +219,4 @@ async function uploadToCloud() {
 }
 
 setupCamera();
+
