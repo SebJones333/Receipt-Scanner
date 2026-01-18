@@ -21,7 +21,7 @@ const BRAND_DATA = {
     "Kroger": { instant: ["KROGER"], level1: ["PLUS CUSTOMER", "FUEL POINTS", "LOW PRICES", "PLUS CARD"], level2: ["2200 E 12 MILE", "2483971520"] },
     "Costco": { instant: ["COSTCO"], level1: ["WHOLESALE", "MEMBER"], level2: ["393", "30550 STEPHENSON", "48071"] },
     "Target": { instant: ["TARGET"], level1: ["CIRCLE", "REDCARD"], level2: ["614-9792", "1301 COOLIDGE", "49084"] },
-    "Home Depot": { instant: ["HOME DEPOT", "DEPOT"], level1: ["DOERS", "GET MORE DONE"], level2: ["1177 COOLIDGE", "48084", "816-8001"] },
+    "Home Depot": { instant: ["HOME DEPOT", "DEPOT"], level1: ["DOERS", "GET MORE DONE"], level2: ["1177 COOLIDGE", "48084", "816-8001", "660 WEST"] },
     "Trader Joes": { instant: ["TRADER JOES", "TRADERJOES"], level1: ["JOE'S", "9:00AM", "9:00PM"], level2: ["27880 WOODWARD", "48067", "582-9002"] },
     "Ace": { instant: ["ACE HARDWARE", "GREAT LAKES ACE"], level1: ["HARDWARE"], level2: ["18086", "541-4904", "515 E. 4TH"] }
 };
@@ -72,7 +72,7 @@ function autoDetectStore(rawText) {
                 words.forEach(word => { if (similarity(word, anchor) >= fuzzyThreshold) score += 2; });
             }
         });
-        criteria.level2.forEach(term => { if (upperFull.includes(term)) score += 1; });
+        criteria.level2.forEach(term => { if (upperFull.includes(term)) score += 0.75; });
         if (score > highestScore) { highestScore = score; bestMatch = brand; }
     }
     badgeStoreMatch.style.display = (bestMatch !== "Other") ? "inline" : "none";
@@ -239,3 +239,4 @@ async function uploadToCloud() {
 }
 
 setupCamera();
+
