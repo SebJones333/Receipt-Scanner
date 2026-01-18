@@ -109,43 +109,49 @@ async function setupCamera() {
 
 // --- CAPTURE & SCAN ---
 snap.addEventListener('click', async () => {
-    status.innerText = "Capturing...";
+    status.innerText = "Stabilizing Light & Focus...";
     const capabilities = videoTrack ? videoTrack.getCapabilities() : {};
     const canFlash = capabilities.torch || false;
 
     try {
         if (canFlash) {
+            // Turn on flash
             await videoTrack.applyConstraints({ 
-                advanced: [{ 
-                    torch: true,
-                    // Force the focus to be as sharp as possible
-                    focusMode: "continuous" 
-                }] 
+                advanced: [{ torch: true }] 
             });
-            // 500ms allows the sensor to settle and focus after the flash hits
-            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Wait 1.5 seconds for the sensor to finish adjusting exposure and focus
+            await new Promise(resolve => setTimeout(resolve, 1500));
         }
 
+        status.innerText = "Capturing High-Res Frame...";
+        
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
         
-        // --- THE CLARITY SECRET SAUCE ---
-        // We apply a filter to the canvas to mimic a real scanner
-        ctx.filter = 'contrast(1.4) brightness(1.1) grayscale(1)';
+        // --- PRE-PROCESSING FOR OCR CLARITY ---
+        // Boost contrast and convert to grayscale to help Tesseract
+        ctx.filter = 'contrast(1.5) brightness(1.0) grayscale(1)';
         ctx.drawImage(video, 0, 0);
         
-        currentPhoto = canvas.toDataURL('image/jpeg', 1.0); // Maximum quality (1.0)
+        // Save at 100% quality
+        currentPhoto = canvas.toDataURL('image/jpeg', 1.0);
 
-        if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
+        // Turn flash off after capture
+        if (canFlash) {
+            await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
+        }
 
-        status.innerText = "Processing High-Contrast Scan...";
+        status.innerText = "Scanning Text...";
         const { data: { text } } = await Tesseract.recognize(currentPhoto, 'eng');
         processSummary(text);
 
     } catch (error) {
+        // Safety: Ensure flash is turned off if anything crashes
         if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
-        status.innerText = "Error: Scan failed.";
+        status.innerText = "Error: Capture failed.";
+        console.error(error);
     }
 });
 
@@ -219,4 +225,5 @@ async function uploadToCloud() {
 }
 
 setupCamera();
+
 
