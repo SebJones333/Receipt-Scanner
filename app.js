@@ -9,6 +9,7 @@ const badgeDefaulted = document.getElementById('badge-defaulted');
 const badgeToday = document.getElementById('badge-today');
 const badgeStoreMatch = document.getElementById('badge-store-match');
 const canvas = document.getElementById('canvas');
+const useFlashCheckbox = document.getElementById('useFlash');
 
 let currentPhoto = null; 
 let videoTrack = null;
@@ -109,36 +110,31 @@ async function setupCamera() {
 
 // --- CAPTURE & SCAN ---
 snap.addEventListener('click', async () => {
-    status.innerText = "Stabilizing Light & Focus...";
+    const shouldFlash = useFlashCheckbox.checked;
     const capabilities = videoTrack ? videoTrack.getCapabilities() : {};
-    const canFlash = capabilities.torch || false;
+    const canFlash = capabilities.torch && shouldFlash;
 
     try {
         if (canFlash) {
-            // Turn on flash
-            await videoTrack.applyConstraints({ 
-                advanced: [{ torch: true }] 
-            });
-            
-            // Wait 1.5 seconds for the sensor to finish adjusting exposure and focus
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            status.innerText = "Stabilizing Light & Focus (1.6s)...";
+            await videoTrack.applyConstraints({ advanced: [{ torch: true }] });
+            // Wait 1.5s for the sensor to balance exposure
+            await new Promise(resolve => setTimeout(resolve, 1600));
+        } else {
+            status.innerText = "Capturing...";
         }
 
-        status.innerText = "Capturing High-Res Frame...";
-        
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
         
-        // --- PRE-PROCESSING FOR OCR CLARITY ---
-        // Boost contrast and convert to grayscale to help Tesseract
+        // High-contrast preprocessing for better OCR
         ctx.filter = 'contrast(1.5) brightness(1.0) grayscale(1)';
         ctx.drawImage(video, 0, 0);
         
-        // Save at 100% quality
         currentPhoto = canvas.toDataURL('image/jpeg', 1.0);
 
-        // Turn flash off after capture
+        // Turn flash off immediately after capture
         if (canFlash) {
             await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
         }
@@ -148,7 +144,6 @@ snap.addEventListener('click', async () => {
         processSummary(text);
 
     } catch (error) {
-        // Safety: Ensure flash is turned off if anything crashes
         if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
         status.innerText = "Error: Capture failed.";
         console.error(error);
@@ -225,5 +220,6 @@ async function uploadToCloud() {
 }
 
 setupCamera();
+
 
 
