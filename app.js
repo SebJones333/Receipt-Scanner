@@ -24,7 +24,7 @@ const BRAND_DATA = {
     "Ace": { instant: ["ACE HARDWARE", "GREAT LAKES ACE"], level1: ["HARDWARE"], level2: ["18086", "541-4904", "515 E. 4TH"] }
 };
 
-// --- FUZZY MATCHING (Currently set to 0.7 sensitivity) ---
+// --- FUZZY MATCHING (Sensitivity: 0.7) ---
 function similarity(s1, s2) {
     let longer = s1; let shorter = s2;
     if (s1.length < s2.length) { longer = s2; shorter = s1; }
@@ -56,7 +56,7 @@ function autoDetectStore(rawText) {
     const words = upperFull.split(/\s+/);
     let bestMatch = "Other";
     let highestScore = 0;
-    const fuzzyThreshold = 0.7; // <-- CHANGE THIS TO ADJUST 1-2 CHARACTER ERROR HANDLING
+    const fuzzyThreshold = 0.7;
 
     for (const [brand, criteria] of Object.entries(BRAND_DATA)) {
         if (criteria.instant.some(term => upperFull.includes(term))) {
@@ -115,9 +115,12 @@ snap.addEventListener('click', async () => {
 
 function processSummary(rawText) {
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+    
+    // 1. STORE DETECTION
     editStore.value = autoDetectStore(rawText);
     toggleCustomStore();
 
+    // 2. DATE LOGIC
     const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/);
     const todayStr = formatToShortDate(new Date());
     let finalDate = todayStr;
@@ -128,24 +131,56 @@ function processSummary(rawText) {
         else badgeDefaulted.style.display = "inline";
     } else badgeDefaulted.style.display = "inline";
 
+    // 3. UPDATED TOTAL LOGIC (Consensus & Frequency)
+    let priceCounts = {};
     let candidates = [];
+
     lines.forEach((line, index) => {
         const upper = line.toUpperCase();
+        
+        // Step A: Ignore lines with "Savings Trap" words
         const isSavings = ["SAVINGS","SAVED","POINTS","YOU","COUPON","DISCOUNT"].some(word => upper.includes(word));
+        
+        // Step B: Look for price pattern at end of line
         const priceMatch = line.match(/(\d+[\.,]\d{2})[^\d]*$/);
+        
         if (priceMatch && !isSavings) {
             const val = parseFloat(priceMatch[1].replace(',', '.'));
+            
+            // Track how many times each price appears
+            priceCounts[val] = (priceCounts[val] || 0) + 1;
+
+            // Basic Weighted Scoring (as fallback)
             let score = 0;
             if (["BALANCE","TOTAL","DUE"].some(word => upper.includes(word))) score += 20;
-            if (["MASTERCARD","VISA","DEBIT","TENDER"].some(word => upper.includes(word))) score += 15;
-            if (index > lines.length * 0.8) score += 5;
+            if (["MASTERCARD","VISA","DEBIT","TENDER","BC AMT"].some(word => upper.includes(word))) score += 30;
+            if (index > lines.length * 0.7) score += 5;
+            
             candidates.push({ val, score, index });
         }
     });
-    candidates.sort((a, b) => (b.score - a.score) || (b.index - a.index));
+
+    // Step C: Prioritize by frequency, then by Magnitude
+    // Filter to find prices that appear 2+ times
+    let duplicates = Object.keys(priceCounts)
+        .filter(p => priceCounts[p] >= 2)
+        .map(p => parseFloat(p));
+
+    let finalTotalValue = 0;
+
+    if (duplicates.length > 0) {
+        // Winner: The largest number that appeared more than once
+        finalTotalValue = Math.max(...duplicates);
+    } else {
+        // Fallback: The highest scoring single candidate
+        candidates.sort((a, b) => (b.score - a.score) || (b.index - a.index));
+        finalTotalValue = candidates.length > 0 ? candidates[0].val : 0;
+    }
+
     editDate.value = finalDate;
-    editTotal.value = candidates.length > 0 ? candidates[0].val.toFixed(2) : "0.00";
-    resultArea.style.display = "block"; status.innerText = "Verify and Save.";
+    editTotal.value = finalTotalValue.toFixed(2);
+    resultArea.style.display = "block"; 
+    status.innerText = "Verify and Save.";
 }
 
 async function uploadToCloud() {
