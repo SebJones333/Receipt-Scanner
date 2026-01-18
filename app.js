@@ -5,6 +5,7 @@ const resultArea = document.getElementById('result-area');
 const editStore = document.getElementById('editStore');
 const editDate = document.getElementById('editDate');
 const editTotal = document.getElementById('editTotal');
+const dateNote = document.getElementById('dateNote');
 const canvas = document.getElementById('canvas');
 
 let currentPhoto = null; 
@@ -14,6 +15,22 @@ function toggleCustomStore() {
     const group = document.getElementById('customStoreGroup');
     group.style.display = (editStore.value === 'Other') ? 'block' : 'none';
 }
+
+// HELPER: Forces Date into MM/DD/YY format
+function formatToShortDate(dateObj) {
+    let mm = dateObj.getMonth() + 1;
+    let dd = dateObj.getDate();
+    let yy = dateObj.getFullYear().toString().substring(2);
+    return (mm < 10 ? '0' : '') + mm + '/' + (dd < 10 ? '0' : '') + dd + '/' + yy;
+}
+
+// AUTO-SLASH: Inserts slashes while typing in the date field
+editDate.addEventListener('input', (e) => {
+    let v = e.target.value.replace(/\D/g, '').slice(0, 6);
+    if (v.length >= 4) v = v.slice(0, 2) + '/' + v.slice(2, 4) + '/' + v.slice(4);
+    else if (v.length >= 2) v = v.slice(0, 2) + '/' + v.slice(2);
+    e.target.value = v;
+});
 
 async function setupCamera() {
     try {
@@ -46,29 +63,28 @@ snap.addEventListener('click', async () => {
 function processSummary(rawText) {
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
     
-    // 1. EXTRACT AND VALIDATE DATE
+    // 1. DATE EXTRACTION
     const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/);
-    let finalDate = new Date().toLocaleDateString('en-US'); // Default to Today
-    
+    let finalDate = formatToShortDate(new Date()); // Default to Today
+    dateNote.style.display = "inline"; // Assume default initially
+
     if (dateMatch) {
-        const extracted = dateMatch[0];
-        // Check if the extracted date is a real, valid date
-        const d = new Date(extracted);
+        const d = new Date(dateMatch[0]);
         if (!isNaN(d.getTime())) {
-            finalDate = extracted;
+            finalDate = formatToShortDate(d);
+            dateNote.style.display = "none"; // Hide warning if scan worked
         }
     }
 
-    // 2. EXTRACT TOTAL (The "Kroger-Safe" Logic)
+    // 2. TOTAL EXTRACTION
     let candidates = [];
     lines.forEach((line, index) => {
         const upper = line.toUpperCase();
-        const isSavingsLine = upper.includes("SAVINGS") || upper.includes("SAVED") || upper.includes("POINTS") || 
-                              upper.includes("YOU") || upper.includes("COUPON") || upper.includes("DISCOUNT");
+        const isSavings = upper.includes("SAVINGS") || upper.includes("SAVED") || upper.includes("POINTS") || 
+                           upper.includes("YOU") || upper.includes("COUPON") || upper.includes("DISCOUNT");
 
         const priceMatch = line.match(/(\d+[\.,]\d{2})[^\d]*$/);
-        
-        if (priceMatch && !isSavingsLine) {
+        if (priceMatch && !isSavings) {
             const val = parseFloat(priceMatch[1].replace(',', '.'));
             let score = 0;
             if (upper.includes("BALANCE") || upper.includes("TOTAL") || upper.includes("DUE")) score += 20;
@@ -81,10 +97,10 @@ function processSummary(rawText) {
     candidates.sort((a, b) => (b.score - a.score) || (b.index - a.index));
     let finalTotal = candidates.length > 0 ? candidates[0].val.toFixed(2) : "0.00";
 
-    document.getElementById('editDate').value = finalDate;
-    document.getElementById('editTotal').value = finalTotal;
-    document.getElementById('result-area').style.display = "block";
-    document.getElementById('status').innerText = "Verify and Save.";
+    editDate.value = finalDate;
+    editTotal.value = finalTotal;
+    resultArea.style.display = "block";
+    status.innerText = "Verify and Save.";
 }
 
 async function uploadToCloud() {
@@ -92,7 +108,6 @@ async function uploadToCloud() {
     btn.disabled = true;
     status.innerText = "Saving to Google...";
 
-    // Determine store name (Dropdown vs Custom Input)
     const storeName = (editStore.value === 'Other') 
         ? document.getElementById('customStoreName').value 
         : editStore.value;
@@ -113,7 +128,6 @@ async function uploadToCloud() {
         status.innerText = "Success! Logged.";
         resultArea.style.display = "none";
         btn.disabled = false;
-        // Reset custom input
         document.getElementById('customStoreName').value = "";
     } catch (e) {
         status.innerText = "Upload Failed.";
