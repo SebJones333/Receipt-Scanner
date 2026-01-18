@@ -8,8 +8,8 @@ const editTotal = document.getElementById('editTotal');
 const badgeDefaulted = document.getElementById('badge-defaulted');
 const badgeToday = document.getElementById('badge-today');
 const badgeStoreMatch = document.getElementById('badge-store-match');
-const canvas = document.getElementById('canvas');
 const useFlashCheckbox = document.getElementById('useFlash');
+const canvas = document.getElementById('canvas');
 
 let currentPhoto = null; 
 let videoTrack = null;
@@ -58,7 +58,7 @@ function autoDetectStore(rawText) {
     const words = upperFull.split(/\s+/);
     let bestMatch = "Other";
     let highestScore = 0;
-    const fuzzyThreshold = 0.7; // <-- Handle 1 or 2 character OCR errors
+    const fuzzyThreshold = 0.7; 
 
     for (const [brand, criteria] of Object.entries(BRAND_DATA)) {
         if (criteria.instant.some(term => upperFull.includes(term))) {
@@ -116,10 +116,9 @@ snap.addEventListener('click', async () => {
 
     try {
         if (canFlash) {
-            status.innerText = "Stabilizing Light & Focus (1.6s)...";
+            status.innerText = "Stabilizing Light & Focus (1.5s)...";
             await videoTrack.applyConstraints({ advanced: [{ torch: true }] });
-            // Wait 1.5s for the sensor to balance exposure
-            await new Promise(resolve => setTimeout(resolve, 1600));
+            await new Promise(resolve => setTimeout(resolve, 1500));
         } else {
             status.innerText = "Capturing...";
         }
@@ -127,26 +126,20 @@ snap.addEventListener('click', async () => {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
-        
-        // High-contrast preprocessing for better OCR
         ctx.filter = 'contrast(1.5) brightness(1.0) grayscale(1)';
         ctx.drawImage(video, 0, 0);
         
         currentPhoto = canvas.toDataURL('image/jpeg', 1.0);
 
-        // Turn flash off immediately after capture
-        if (canFlash) {
-            await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
-        }
+        if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
 
-        status.innerText = "Scanning Text...";
+        status.innerText = "Scanning...";
         const { data: { text } } = await Tesseract.recognize(currentPhoto, 'eng');
         processSummary(text);
 
     } catch (error) {
         if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
-        status.innerText = "Error: Capture failed.";
-        console.error(error);
+        status.innerText = "Error: Scan failed.";
     }
 });
 
@@ -157,21 +150,49 @@ function processSummary(rawText) {
     editStore.value = autoDetectStore(rawText);
     toggleCustomStore();
 
-    // 2. DATE LOGIC
-    const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/);
+    // 2. NEW DATE LOGIC (Anchor + Multi-Format Support)
+    const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
     const todayStr = formatToShortDate(new Date());
     let finalDate = todayStr;
-    badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
-    
-    if (dateMatch) {
-        const d = new Date(dateMatch[0]);
-        if (!isNaN(d.getTime())) { 
-            finalDate = formatToShortDate(d); 
-            if (finalDate === todayStr) badgeToday.style.display = "inline"; 
-        } else { badgeDefaulted.style.display = "inline"; }
-    } else { badgeDefaulted.style.display = "inline"; }
+    badgeDefaulted.style.display = "none";
+    badgeToday.style.display = "none";
 
-    // 3. CONSENSUS TOTAL LOGIC (Frequency + Magnitude)
+    let foundNearAnchor = false;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toUpperCase().includes("DATE")) {
+            for (let j = i; j <= i + 2 && j < lines.length; j++) {
+                let match = lines[j].match(dateRegex);
+                if (match) {
+                    // Normalize separators (hyphens/dots to slashes) for JavaScript Date object
+                    let normalized = match[0].replace(/\./g, '/').replace(/-/g, '/');
+                    let d = new Date(normalized);
+                    if (!isNaN(d.getTime())) {
+                        finalDate = formatToShortDate(d);
+                        foundNearAnchor = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (foundNearAnchor) break;
+    }
+
+    if (!foundNearAnchor) {
+        const globalMatch = rawText.match(dateRegex);
+        if (globalMatch) {
+            let normalized = globalMatch[0].replace(/\./g, '/').replace(/-/g, '/');
+            let d = new Date(normalized);
+            if (!isNaN(d.getTime())) {
+                finalDate = formatToShortDate(d);
+            } else { badgeDefaulted.style.display = "inline"; }
+        } else { badgeDefaulted.style.display = "inline"; }
+    }
+
+    if (finalDate === todayStr && badgeDefaulted.style.display === "none") {
+        badgeToday.style.display = "inline";
+    }
+
+    // 3. CONSENSUS TOTAL LOGIC
     let priceCounts = {};
     let candidates = [];
 
@@ -188,7 +209,6 @@ function processSummary(rawText) {
             if (["BALANCE","TOTAL","DUE"].some(word => upper.includes(word))) score += 20;
             if (["MASTERCARD","VISA","DEBIT","TENDER","BC AMT"].some(word => upper.includes(word))) score += 30;
             if (index > lines.length * 0.7) score += 5;
-            
             candidates.push({ val, score, index });
         }
     });
@@ -197,7 +217,7 @@ function processSummary(rawText) {
     let finalTotalValue = 0;
 
     if (duplicates.length > 0) {
-        finalTotalValue = Math.max(...duplicates); // Larger of the frequency matches
+        finalTotalValue = Math.max(...duplicates);
     } else {
         candidates.sort((a, b) => (b.score - a.score) || (b.index - a.index));
         finalTotalValue = candidates.length > 0 ? candidates[0].val : 0;
@@ -220,6 +240,3 @@ async function uploadToCloud() {
 }
 
 setupCamera();
-
-
-
