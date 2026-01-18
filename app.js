@@ -26,7 +26,7 @@ const BRAND_DATA = {
     "Ace": { instant: ["ACE HARDWARE", "GREAT LAKES ACE"], level1: ["HARDWARE"], level2: ["18086", "541-4904", "515 E. 4TH"] }
 };
 
-// --- FUZZY MATCHING LOGIC ---
+// Fuzzy Logic
 function similarity(s1, s2) {
     let longer = s1; let shorter = s2;
     if (s1.length < s2.length) { longer = s2; shorter = s1; }
@@ -58,7 +58,7 @@ function autoDetectStore(rawText) {
     const words = upperFull.split(/\s+/);
     let bestMatch = "Other";
     let highestScore = 0;
-    const fuzzyThreshold = 0.7; 
+    const fuzzyThreshold = 0.7;
 
     for (const [brand, criteria] of Object.entries(BRAND_DATA)) {
         if (criteria.instant.some(term => upperFull.includes(term))) {
@@ -79,8 +79,15 @@ function autoDetectStore(rawText) {
     return bestMatch;
 }
 
-// --- UI & INPUT HELPERS ---
-[editDate, editTotal].forEach(el => el.addEventListener('click', function() { this.setSelectionRange(0, this.value.length); }));
+// --- FIX: RESET VIEW AFTER KEYBOARD CLOSES ---
+[editDate, editTotal, document.getElementById('customStoreName')].forEach(el => {
+    el.addEventListener('click', function() { this.setSelectionRange(0, this.value.length); });
+    el.addEventListener('blur', () => {
+        setTimeout(() => {
+            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        }, 100);
+    });
+});
 
 function toggleCustomStore() { document.getElementById('customStoreGroup').style.display = (editStore.value === 'Other') ? 'block' : 'none'; }
 
@@ -96,7 +103,6 @@ editDate.addEventListener('input', (e) => {
     e.target.value = v; badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
 });
 
-// --- CAMERA SETUP ---
 async function setupCamera() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -108,7 +114,6 @@ async function setupCamera() {
     } catch (err) { status.innerText = "Error: Camera access denied."; }
 }
 
-// --- CAPTURE & SCAN ---
 snap.addEventListener('click', async () => {
     const shouldFlash = useFlashCheckbox.checked;
     const capabilities = videoTrack ? videoTrack.getCapabilities() : {};
@@ -145,17 +150,13 @@ snap.addEventListener('click', async () => {
 
 function processSummary(rawText) {
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
-    
-    // 1. STORE DETECTION
     editStore.value = autoDetectStore(rawText);
     toggleCustomStore();
 
-    // 2. NEW DATE LOGIC (Anchor + Multi-Format Support)
     const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
     const todayStr = formatToShortDate(new Date());
     let finalDate = todayStr;
-    badgeDefaulted.style.display = "none";
-    badgeToday.style.display = "none";
+    badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
 
     let foundNearAnchor = false;
     for (let i = 0; i < lines.length; i++) {
@@ -163,7 +164,6 @@ function processSummary(rawText) {
             for (let j = i; j <= i + 2 && j < lines.length; j++) {
                 let match = lines[j].match(dateRegex);
                 if (match) {
-                    // Normalize separators (hyphens/dots to slashes) for JavaScript Date object
                     let normalized = match[0].replace(/\./g, '/').replace(/-/g, '/');
                     let d = new Date(normalized);
                     if (!isNaN(d.getTime())) {
@@ -192,7 +192,6 @@ function processSummary(rawText) {
         badgeToday.style.display = "inline";
     }
 
-    // 3. CONSENSUS TOTAL LOGIC
     let priceCounts = {};
     let candidates = [];
 
