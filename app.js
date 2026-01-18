@@ -11,6 +11,7 @@ const badgeStoreMatch = document.getElementById('badge-store-match');
 const canvas = document.getElementById('canvas');
 
 let currentPhoto = null; 
+let videoTrack = null;
 const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3BhcNWXYfWsdoDN_hWaEl1cDaha3gp2jWGTCQ2lMy4cUMutAW1Ahi2-d5pf5hKjLd/exec';
 
 // --- STORE FINGERPRINT DATA ---
@@ -24,7 +25,7 @@ const BRAND_DATA = {
     "Ace": { instant: ["ACE HARDWARE", "GREAT LAKES ACE"], level1: ["HARDWARE"], level2: ["18086", "541-4904", "515 E. 4TH"] }
 };
 
-// --- FUZZY MATCHING (Sensitivity: 0.7) ---
+// --- FUZZY MATCHING LOGIC ---
 function similarity(s1, s2) {
     let longer = s1; let shorter = s2;
     if (s1.length < s2.length) { longer = s2; shorter = s1; }
@@ -56,7 +57,7 @@ function autoDetectStore(rawText) {
     const words = upperFull.split(/\s+/);
     let bestMatch = "Other";
     let highestScore = 0;
-    const fuzzyThreshold = 0.7;
+    const fuzzyThreshold = 0.7; // <-- Handle 1 or 2 character OCR errors
 
     for (const [brand, criteria] of Object.entries(BRAND_DATA)) {
         if (criteria.instant.some(term => upperFull.includes(term))) {
@@ -77,7 +78,7 @@ function autoDetectStore(rawText) {
     return bestMatch;
 }
 
-// UI Handlers
+// --- UI & INPUT HELPERS ---
 [editDate, editTotal].forEach(el => el.addEventListener('click', function() { this.setSelectionRange(0, this.value.length); }));
 
 function toggleCustomStore() { document.getElementById('customStoreGroup').style.display = (editStore.value === 'Other') ? 'block' : 'none'; }
@@ -94,23 +95,45 @@ editDate.addEventListener('input', (e) => {
     e.target.value = v; badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
 });
 
+// --- CAMERA SETUP ---
 async function setupCamera() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 } }, audio: false });
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "environment", width: { ideal: 1920 } }, 
+            audio: false 
+        });
         video.srcObject = stream;
+        videoTrack = stream.getVideoTracks()[0];
     } catch (err) { status.innerText = "Error: Camera access denied."; }
 }
 
+// --- CAPTURE & SCAN ---
 snap.addEventListener('click', async () => {
     status.innerText = "Capturing...";
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    currentPhoto = canvas.toDataURL('image/jpeg', 0.9);
-    status.innerText = "Scanning...";
+    const capabilities = videoTrack ? videoTrack.getCapabilities() : {};
+    const canFlash = capabilities.torch || false;
+
     try {
+        if (canFlash) {
+            await videoTrack.applyConstraints({ advanced: [{ torch: true }] });
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        currentPhoto = canvas.toDataURL('image/jpeg', 0.9);
+
+        if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
+
+        status.innerText = "Scanning...";
         const { data: { text } } = await Tesseract.recognize(currentPhoto, 'eng');
         processSummary(text);
-    } catch (error) { status.innerText = "Error: Scan failed."; }
+
+    } catch (error) {
+        if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
+        status.innerText = "Error: Scan failed.";
+    }
 });
 
 function processSummary(rawText) {
@@ -125,32 +148,28 @@ function processSummary(rawText) {
     const todayStr = formatToShortDate(new Date());
     let finalDate = todayStr;
     badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
+    
     if (dateMatch) {
         const d = new Date(dateMatch[0]);
-        if (!isNaN(d.getTime())) { finalDate = formatToShortDate(d); if (finalDate === todayStr) badgeToday.style.display = "inline"; }
-        else badgeDefaulted.style.display = "inline";
-    } else badgeDefaulted.style.display = "inline";
+        if (!isNaN(d.getTime())) { 
+            finalDate = formatToShortDate(d); 
+            if (finalDate === todayStr) badgeToday.style.display = "inline"; 
+        } else { badgeDefaulted.style.display = "inline"; }
+    } else { badgeDefaulted.style.display = "inline"; }
 
-    // 3. UPDATED TOTAL LOGIC (Consensus & Frequency)
+    // 3. CONSENSUS TOTAL LOGIC (Frequency + Magnitude)
     let priceCounts = {};
     let candidates = [];
 
     lines.forEach((line, index) => {
         const upper = line.toUpperCase();
-        
-        // Step A: Ignore lines with "Savings Trap" words
         const isSavings = ["SAVINGS","SAVED","POINTS","YOU","COUPON","DISCOUNT"].some(word => upper.includes(word));
-        
-        // Step B: Look for price pattern at end of line
         const priceMatch = line.match(/(\d+[\.,]\d{2})[^\d]*$/);
         
         if (priceMatch && !isSavings) {
             const val = parseFloat(priceMatch[1].replace(',', '.'));
-            
-            // Track how many times each price appears
             priceCounts[val] = (priceCounts[val] || 0) + 1;
 
-            // Basic Weighted Scoring (as fallback)
             let score = 0;
             if (["BALANCE","TOTAL","DUE"].some(word => upper.includes(word))) score += 20;
             if (["MASTERCARD","VISA","DEBIT","TENDER","BC AMT"].some(word => upper.includes(word))) score += 30;
@@ -160,19 +179,12 @@ function processSummary(rawText) {
         }
     });
 
-    // Step C: Prioritize by frequency, then by Magnitude
-    // Filter to find prices that appear 2+ times
-    let duplicates = Object.keys(priceCounts)
-        .filter(p => priceCounts[p] >= 2)
-        .map(p => parseFloat(p));
-
+    let duplicates = Object.keys(priceCounts).filter(p => priceCounts[p] >= 2).map(p => parseFloat(p));
     let finalTotalValue = 0;
 
     if (duplicates.length > 0) {
-        // Winner: The largest number that appeared more than once
-        finalTotalValue = Math.max(...duplicates);
+        finalTotalValue = Math.max(...duplicates); // Larger of the frequency matches
     } else {
-        // Fallback: The highest scoring single candidate
         candidates.sort((a, b) => (b.score - a.score) || (b.index - a.index));
         finalTotalValue = candidates.length > 0 ? candidates[0].val : 0;
     }
