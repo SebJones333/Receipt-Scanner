@@ -1,4 +1,3 @@
-
 const video = document.getElementById('video');
 const snap = document.getElementById('snap');
 const status = document.getElementById('status');
@@ -10,6 +9,11 @@ const canvas = document.getElementById('canvas');
 
 let currentPhoto = null; 
 const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3BhcNWXYfWsdoDN_hWaEl1cDaha3gp2jWGTCQ2lMy4cUMutAW1Ahi2-d5pf5hKjLd/exec';
+
+function toggleCustomStore() {
+    const group = document.getElementById('customStoreGroup');
+    group.style.display = (editStore.value === 'Other') ? 'block' : 'none';
+}
 
 async function setupCamera() {
     try {
@@ -42,55 +46,45 @@ snap.addEventListener('click', async () => {
 function processSummary(rawText) {
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
     
-    // 1. EXTRACT DATE
+    // 1. EXTRACT AND VALIDATE DATE
     const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/);
-    const date = dateMatch ? dateMatch[0] : new Date().toLocaleDateString();
+    let finalDate = new Date().toLocaleDateString('en-US'); // Default to Today
+    
+    if (dateMatch) {
+        const extracted = dateMatch[0];
+        // Check if the extracted date is a real, valid date
+        const d = new Date(extracted);
+        if (!isNaN(d.getTime())) {
+            finalDate = extracted;
+        }
+    }
 
     // 2. EXTRACT TOTAL (The "Kroger-Safe" Logic)
     let candidates = [];
-    
     lines.forEach((line, index) => {
         const upper = line.toUpperCase();
-        
-        // HARD BLOCK: If these words appear, we DO NOT want this number
-        const isSavingsLine = upper.includes("SAVINGS") || 
-                              upper.includes("SAVED") || 
-                              upper.includes("POINTS") || 
-                              upper.includes("YOU") ||
-                              upper.includes("COUPON") ||
-                              upper.includes("DISCOUNT");
+        const isSavingsLine = upper.includes("SAVINGS") || upper.includes("SAVED") || upper.includes("POINTS") || 
+                              upper.includes("YOU") || upper.includes("COUPON") || upper.includes("DISCOUNT");
 
-        // Regex finds a price (e.g., 98.56) at the end of the line
         const priceMatch = line.match(/(\d+[\.,]\d{2})[^\d]*$/);
         
         if (priceMatch && !isSavingsLine) {
             const val = parseFloat(priceMatch[1].replace(',', '.'));
-            
             let score = 0;
-            // High Priority Keywords
             if (upper.includes("BALANCE") || upper.includes("TOTAL") || upper.includes("DUE")) score += 20;
-            // Payment Keywords (Kroger often lists the Mastercard amount as the final total)
             if (upper.includes("MASTERCARD") || upper.includes("VISA") || upper.includes("DEBIT") || upper.includes("TENDER")) score += 15;
-            // Position Weight (Numbers at the very bottom are more likely to be the total)
             if (index > lines.length * 0.8) score += 5;
-
             candidates.push({ val, score, index });
         }
     });
 
-    // Sort: Best score first. If scores are equal, take the one lower down the receipt.
     candidates.sort((a, b) => (b.score - a.score) || (b.index - a.index));
+    let finalTotal = candidates.length > 0 ? candidates[0].val.toFixed(2) : "0.00";
 
-    let finalTotal = "0.00";
-    if (candidates.length > 0) {
-        finalTotal = candidates[0].val.toFixed(2);
-    }
-
-    // 3. UPDATE UI
-    document.getElementById('editDate').value = date;
+    document.getElementById('editDate').value = finalDate;
     document.getElementById('editTotal').value = finalTotal;
     document.getElementById('result-area').style.display = "block";
-    document.getElementById('status').innerText = "Double-check the Total & Date.";
+    document.getElementById('status').innerText = "Verify and Save.";
 }
 
 async function uploadToCloud() {
@@ -98,8 +92,13 @@ async function uploadToCloud() {
     btn.disabled = true;
     status.innerText = "Saving to Google...";
 
+    // Determine store name (Dropdown vs Custom Input)
+    const storeName = (editStore.value === 'Other') 
+        ? document.getElementById('customStoreName').value 
+        : editStore.value;
+
     const payload = {
-        store: editStore.value,
+        store: storeName || "Unknown",
         date: editDate.value,
         total: editTotal.value,
         photo: currentPhoto
@@ -111,9 +110,11 @@ async function uploadToCloud() {
             mode: 'no-cors',
             body: JSON.stringify(payload)
         });
-        status.innerText = "Success! Logged to " + editDate.value.split(/[\/-]/)[0]; 
+        status.innerText = "Success! Logged.";
         resultArea.style.display = "none";
         btn.disabled = false;
+        // Reset custom input
+        document.getElementById('customStoreName').value = "";
     } catch (e) {
         status.innerText = "Upload Failed.";
         btn.disabled = false;
