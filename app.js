@@ -5,18 +5,25 @@ const resultArea = document.getElementById('result-area');
 const editStore = document.getElementById('editStore');
 const editDate = document.getElementById('editDate');
 const editTotal = document.getElementById('editTotal');
-const dateNote = document.getElementById('dateNote');
+const badgeDefaulted = document.getElementById('badge-defaulted');
+const badgeToday = document.getElementById('badge-today');
 const canvas = document.getElementById('canvas');
 
 let currentPhoto = null; 
 const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3BhcNWXYfWsdoDN_hWaEl1cDaha3gp2jWGTCQ2lMy4cUMutAW1Ahi2-d5pf5hKjLd/exec';
+
+// NEW: Highlight everything when clicking Date or Total
+[editDate, editTotal].forEach(el => {
+    el.addEventListener('click', function() {
+        this.setSelectionRange(0, this.value.length);
+    });
+});
 
 function toggleCustomStore() {
     const group = document.getElementById('customStoreGroup');
     group.style.display = (editStore.value === 'Other') ? 'block' : 'none';
 }
 
-// HELPER: Forces Date into MM/DD/YY format
 function formatToShortDate(dateObj) {
     let mm = dateObj.getMonth() + 1;
     let dd = dateObj.getDate();
@@ -24,12 +31,14 @@ function formatToShortDate(dateObj) {
     return (mm < 10 ? '0' : '') + mm + '/' + (dd < 10 ? '0' : '') + dd + '/' + yy;
 }
 
-// AUTO-SLASH: Inserts slashes while typing in the date field
 editDate.addEventListener('input', (e) => {
     let v = e.target.value.replace(/\D/g, '').slice(0, 6);
     if (v.length >= 4) v = v.slice(0, 2) + '/' + v.slice(2, 4) + '/' + v.slice(4);
     else if (v.length >= 2) v = v.slice(0, 2) + '/' + v.slice(2);
     e.target.value = v;
+    // Hide badges when manual typing starts
+    badgeDefaulted.style.display = "none";
+    badgeToday.style.display = "none";
 });
 
 async function setupCamera() {
@@ -63,20 +72,30 @@ snap.addEventListener('click', async () => {
 function processSummary(rawText) {
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
     
-    // 1. DATE EXTRACTION
+    // 1. DATE LOGIC
     const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/);
-    let finalDate = formatToShortDate(new Date()); // Default to Today
-    dateNote.style.display = "inline"; // Assume default initially
+    const todayStr = formatToShortDate(new Date());
+    
+    let finalDate = todayStr;
+    badgeDefaulted.style.display = "none";
+    badgeToday.style.display = "none";
 
     if (dateMatch) {
         const d = new Date(dateMatch[0]);
         if (!isNaN(d.getTime())) {
             finalDate = formatToShortDate(d);
-            dateNote.style.display = "none"; // Hide warning if scan worked
+            // If it matched a date AND that date is today
+            if (finalDate === todayStr) {
+                badgeToday.style.display = "inline";
+            }
+        } else {
+            badgeDefaulted.style.display = "inline";
         }
+    } else {
+        badgeDefaulted.style.display = "inline";
     }
 
-    // 2. TOTAL EXTRACTION
+    // 2. TOTAL LOGIC
     let candidates = [];
     lines.forEach((line, index) => {
         const upper = line.toUpperCase();
@@ -106,7 +125,7 @@ function processSummary(rawText) {
 async function uploadToCloud() {
     const btn = document.getElementById('saveBtn');
     btn.disabled = true;
-    status.innerText = "Saving to Google...";
+    status.innerText = "Saving...";
 
     const storeName = (editStore.value === 'Other') 
         ? document.getElementById('customStoreName').value 
@@ -125,10 +144,9 @@ async function uploadToCloud() {
             mode: 'no-cors',
             body: JSON.stringify(payload)
         });
-        status.innerText = "Success! Logged.";
+        status.innerText = "Success!";
         resultArea.style.display = "none";
         btn.disabled = false;
-        document.getElementById('customStoreName').value = "";
     } catch (e) {
         status.innerText = "Upload Failed.";
         btn.disabled = false;
