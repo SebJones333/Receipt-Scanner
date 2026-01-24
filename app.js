@@ -7,27 +7,92 @@ const editDate = document.getElementById('editDate');
 const editTotal = document.getElementById('editTotal');
 const badgeDefaulted = document.getElementById('badge-defaulted');
 const badgeToday = document.getElementById('badge-today');
+const badgeStoreMatch = document.getElementById('badge-store-match');
+const useFlashCheckbox = document.getElementById('useFlash');
 const canvas = document.getElementById('canvas');
 
 let currentPhoto = null; 
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3BhcNWXYfWsdoDN_hWaEl1cDaha3gp2jWGTCQ2lMy4cUMutAW1Ahi2-d5pf5hKjLd/exec';
+let videoTrack = null;
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw0hdRjNeNMOOcRxt3ermPO-BBxscGSUFp_lR2Dwwg1BW0QUbLZ-uXF4SccAFjVkOZV/exec';
 
-// NEW: Highlight everything when clicking Date or Total
-[editDate, editTotal].forEach(el => {
-    el.addEventListener('click', function() {
-        this.setSelectionRange(0, this.value.length);
+// --- STORE FINGERPRINT DATA ---
+const BRAND_DATA = {
+    "LIDL": { instant: ["LIDL"], level1: [], level2: [] },
+    "ALDI": { instant: ["ALDI"], level1: [], level2: [] },
+    "HARRIS TEETER": { instant: ["HARRIS TEETER", "TEETER"], level1: [], level2: [] },
+    "Target": { instant: ["TARGET"], level1: ["CIRCLE", "REDCARD"], level2: [] },
+    "HOME GOODS": { instant: ["HOME GOODS", "GOODS"], level1: [], level2: [] },
+    "Trader Joes": { instant: ["TRADER JOES", "TRADERJOES"], level1: [], level2: [] },
+    "WHOLE FOODS": { instant: ["WHOLE FOODS"], level1: [], level2: [] }
+};
+
+// Fuzzy Logic
+function similarity(s1, s2) {
+    let longer = s1; let shorter = s2;
+    if (s1.length < s2.length) { longer = s2; shorter = s1; }
+    let longerLength = longer.length;
+    if (longerLength === 0) return 1.0;
+    return (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength);
+}
+
+function editDistance(s1, s2) {
+    s1 = s1.toLowerCase(); s2 = s2.toLowerCase();
+    let costs = new Array();
+    for (let i = 0; i <= s1.length; i++) {
+        let lastValue = i;
+        for (let j = 0; j <= s2.length; j++) {
+            if (i == 0) costs[j] = j;
+            else if (j > 0) {
+                let newValue = costs[j - 1];
+                if (s1.charAt(i - 1) != s2.charAt(j - 1)) newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+                costs[j - 1] = lastValue; lastValue = newValue;
+            }
+        }
+        if (i > 0) costs[s2.length] = lastValue;
+    }
+    return costs[s2.length];
+}
+
+function autoDetectStore(rawText) {
+    const upperFull = rawText.toUpperCase();
+    const words = upperFull.split(/\s+/);
+    let bestMatch = "Other";
+    let highestScore = 0;
+    const fuzzyThreshold = 0.7;
+
+    for (const [brand, criteria] of Object.entries(BRAND_DATA)) {
+        if (criteria.instant.some(term => upperFull.includes(term))) {
+            badgeStoreMatch.style.display = "inline";
+            return brand;
+        }
+        let score = 0;
+        criteria.level1.forEach(anchor => {
+            if (upperFull.includes(anchor)) score += 2;
+            else {
+                words.forEach(word => { if (similarity(word, anchor) >= fuzzyThreshold) score += 2; });
+            }
+        });
+        criteria.level2.forEach(term => { if (upperFull.includes(term)) score += 0.75; });
+        if (score > highestScore) { highestScore = score; bestMatch = brand; }
+    }
+    badgeStoreMatch.style.display = (bestMatch !== "Other") ? "inline" : "none";
+    return bestMatch;
+}
+
+// --- FIX: RESET VIEW AFTER KEYBOARD CLOSES ---
+[editDate, editTotal, document.getElementById('customStoreName')].forEach(el => {
+    el.addEventListener('click', function() { this.setSelectionRange(0, this.value.length); });
+    el.addEventListener('blur', () => {
+        setTimeout(() => {
+            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        }, 100);
     });
 });
 
-function toggleCustomStore() {
-    const group = document.getElementById('customStoreGroup');
-    group.style.display = (editStore.value === 'Other') ? 'block' : 'none';
-}
+function toggleCustomStore() { document.getElementById('customStoreGroup').style.display = (editStore.value === 'Other') ? 'block' : 'none'; }
 
 function formatToShortDate(dateObj) {
-    let mm = dateObj.getMonth() + 1;
-    let dd = dateObj.getDate();
-    let yy = dateObj.getFullYear().toString().substring(2);
+    let mm = dateObj.getMonth() + 1; let dd = dateObj.getDate(); let yy = dateObj.getFullYear().toString().substring(2);
     return (mm < 10 ? '0' : '') + mm + '/' + (dd < 10 ? '0' : '') + dd + '/' + yy;
 }
 
@@ -35,10 +100,7 @@ editDate.addEventListener('input', (e) => {
     let v = e.target.value.replace(/\D/g, '').slice(0, 6);
     if (v.length >= 4) v = v.slice(0, 2) + '/' + v.slice(2, 4) + '/' + v.slice(4);
     else if (v.length >= 2) v = v.slice(0, 2) + '/' + v.slice(2);
-    e.target.value = v;
-    // Hide badges when manual typing starts
-    badgeDefaulted.style.display = "none";
-    badgeToday.style.display = "none";
+    e.target.value = v; badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
 });
 
 async function setupCamera() {
@@ -48,109 +110,132 @@ async function setupCamera() {
             audio: false 
         });
         video.srcObject = stream;
-    } catch (err) {
-        status.innerText = "Error: Please allow camera access.";
-    }
+        videoTrack = stream.getVideoTracks()[0];
+    } catch (err) { status.innerText = "Error: Camera access denied."; }
 }
 
 snap.addEventListener('click', async () => {
-    status.innerText = "Capturing...";
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    currentPhoto = canvas.toDataURL('image/jpeg', 0.9);
-    
-    status.innerText = "Scanning for Date & Total...";
+    const shouldFlash = useFlashCheckbox.checked;
+    const capabilities = videoTrack ? videoTrack.getCapabilities() : {};
+    const canFlash = capabilities.torch && shouldFlash;
+
     try {
+        if (canFlash) {
+            status.innerText = "Stabilizing Light & Focus (1.5s)...";
+            await videoTrack.applyConstraints({ advanced: [{ torch: true }] });
+            await new Promise(resolve => setTimeout(resolve, 1500));
+        } else {
+            status.innerText = "Capturing...";
+        }
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.filter = 'contrast(1.5) brightness(1.0) grayscale(1)';
+        ctx.drawImage(video, 0, 0);
+        
+        currentPhoto = canvas.toDataURL('image/jpeg', 1.0);
+
+        if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
+
+        status.innerText = "Scanning...";
         const { data: { text } } = await Tesseract.recognize(currentPhoto, 'eng');
         processSummary(text);
+
     } catch (error) {
+        if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
         status.innerText = "Error: Scan failed.";
     }
 });
 
 function processSummary(rawText) {
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
-    
-    // 1. DATE LOGIC
-    const dateMatch = rawText.match(/(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/);
-    const todayStr = formatToShortDate(new Date());
-    
-    let finalDate = todayStr;
-    badgeDefaulted.style.display = "none";
-    badgeToday.style.display = "none";
+    editStore.value = autoDetectStore(rawText);
+    toggleCustomStore();
 
-    if (dateMatch) {
-        const d = new Date(dateMatch[0]);
-        if (!isNaN(d.getTime())) {
-            finalDate = formatToShortDate(d);
-            // If it matched a date AND that date is today
-            if (finalDate === todayStr) {
-                badgeToday.style.display = "inline";
+    const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
+    const todayStr = formatToShortDate(new Date());
+    let finalDate = todayStr;
+    badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
+
+    let foundNearAnchor = false;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toUpperCase().includes("DATE")) {
+            for (let j = i; j <= i + 2 && j < lines.length; j++) {
+                let match = lines[j].match(dateRegex);
+                if (match) {
+                    let normalized = match[0].replace(/\./g, '/').replace(/-/g, '/');
+                    let d = new Date(normalized);
+                    if (!isNaN(d.getTime())) {
+                        finalDate = formatToShortDate(d);
+                        foundNearAnchor = true;
+                        break;
+                    }
+                }
             }
-        } else {
-            badgeDefaulted.style.display = "inline";
         }
-    } else {
-        badgeDefaulted.style.display = "inline";
+        if (foundNearAnchor) break;
     }
 
-    // 2. TOTAL LOGIC
+    if (!foundNearAnchor) {
+        const globalMatch = rawText.match(dateRegex);
+        if (globalMatch) {
+            let normalized = globalMatch[0].replace(/\./g, '/').replace(/-/g, '/');
+            let d = new Date(normalized);
+            if (!isNaN(d.getTime())) {
+                finalDate = formatToShortDate(d);
+            } else { badgeDefaulted.style.display = "inline"; }
+        } else { badgeDefaulted.style.display = "inline"; }
+    }
+
+    if (finalDate === todayStr && badgeDefaulted.style.display === "none") {
+        badgeToday.style.display = "inline";
+    }
+
+    let priceCounts = {};
     let candidates = [];
+
     lines.forEach((line, index) => {
         const upper = line.toUpperCase();
-        const isSavings = upper.includes("SAVINGS") || upper.includes("SAVED") || upper.includes("POINTS") || 
-                           upper.includes("YOU") || upper.includes("COUPON") || upper.includes("DISCOUNT");
-
+        const isSavings = ["SAVINGS","SAVED","POINTS","YOU","COUPON","DISCOUNT"].some(word => upper.includes(word));
         const priceMatch = line.match(/(\d+[\.,]\d{2})[^\d]*$/);
+        
         if (priceMatch && !isSavings) {
             const val = parseFloat(priceMatch[1].replace(',', '.'));
+            priceCounts[val] = (priceCounts[val] || 0) + 1;
+
             let score = 0;
-            if (upper.includes("BALANCE") || upper.includes("TOTAL") || upper.includes("DUE")) score += 20;
-            if (upper.includes("MASTERCARD") || upper.includes("VISA") || upper.includes("DEBIT") || upper.includes("TENDER")) score += 15;
-            if (index > lines.length * 0.8) score += 5;
+            if (["BALANCE","TOTAL","DUE"].some(word => upper.includes(word))) score += 20;
+            if (["MASTERCARD","VISA","DEBIT","TENDER","BC AMT"].some(word => upper.includes(word))) score += 30;
+            if (index > lines.length * 0.7) score += 5;
             candidates.push({ val, score, index });
         }
     });
 
-    candidates.sort((a, b) => (b.score - a.score) || (b.index - a.index));
-    let finalTotal = candidates.length > 0 ? candidates[0].val.toFixed(2) : "0.00";
+    let duplicates = Object.keys(priceCounts).filter(p => priceCounts[p] >= 2).map(p => parseFloat(p));
+    let finalTotalValue = 0;
+
+    if (duplicates.length > 0) {
+        finalTotalValue = Math.max(...duplicates);
+    } else {
+        candidates.sort((a, b) => (b.score - a.score) || (b.index - a.index));
+        finalTotalValue = candidates.length > 0 ? candidates[0].val : 0;
+    }
 
     editDate.value = finalDate;
-    editTotal.value = finalTotal;
-    resultArea.style.display = "block";
+    editTotal.value = finalTotalValue.toFixed(2);
+    resultArea.style.display = "block"; 
     status.innerText = "Verify and Save.";
 }
 
 async function uploadToCloud() {
-    const btn = document.getElementById('saveBtn');
-    btn.disabled = true;
-    status.innerText = "Saving...";
-
-    const storeName = (editStore.value === 'Other') 
-        ? document.getElementById('customStoreName').value 
-        : editStore.value;
-
-    const payload = {
-        store: storeName || "Unknown",
-        date: editDate.value,
-        total: editTotal.value,
-        photo: currentPhoto
-    };
-
+    const btn = document.getElementById('saveBtn'); btn.disabled = true; status.innerText = "Saving...";
+    const storeName = (editStore.value === 'Other') ? document.getElementById('customStoreName').value : editStore.value;
+    const payload = { store: storeName || "Unknown", date: editDate.value, total: editTotal.value, photo: currentPhoto };
     try {
-        await fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            mode: 'no-cors',
-            body: JSON.stringify(payload)
-        });
-        status.innerText = "Success!";
-        resultArea.style.display = "none";
-        btn.disabled = false;
-    } catch (e) {
-        status.innerText = "Upload Failed.";
-        btn.disabled = false;
-    }
+        await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
+        status.innerText = "Success!"; resultArea.style.display = "none"; btn.disabled = false;
+    } catch (e) { status.innerText = "Upload Failed."; btn.disabled = false; }
 }
 
 setupCamera();
