@@ -114,6 +114,7 @@ async function setupCamera() {
     } catch (err) { status.innerText = "Error: Camera access denied."; }
 }
 
+// --- CAPTURE & SCAN ---
 snap.addEventListener('click', async () => {
     const shouldFlash = useFlashCheckbox.checked;
     const capabilities = videoTrack ? videoTrack.getCapabilities() : {};
@@ -131,12 +132,19 @@ snap.addEventListener('click', async () => {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
+        
+        // Apply the high-contrast filter for OCR
         ctx.filter = 'contrast(1.5) brightness(1.0) grayscale(1)';
         ctx.drawImage(video, 0, 0);
         
         currentPhoto = canvas.toDataURL('image/jpeg', 1.0);
 
         if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
+
+        // NEW: FREEZE THE VIEW
+        video.style.display = "none";    // Hide live camera
+        canvas.style.display = "block";  // Show the captured photo
+        snap.style.display = "none";     // Hide the scan button so you don't double-scan
 
         status.innerText = "Scanning...";
         const { data: { text } } = await Tesseract.recognize(currentPhoto, 'eng');
@@ -145,6 +153,10 @@ snap.addEventListener('click', async () => {
     } catch (error) {
         if (canFlash) await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
         status.innerText = "Error: Scan failed.";
+        // Reset view on error
+        video.style.display = "block";
+        canvas.style.display = "none";
+        snap.style.display = "block";
     }
 });
 
@@ -245,13 +257,44 @@ function processSummary(rawText) {
     status.innerText = "Verify and Save.";
 }
 async function uploadToCloud() {
-    const btn = document.getElementById('saveBtn'); btn.disabled = true; status.innerText = "Saving...";
-    const storeName = (editStore.value === 'Other') ? document.getElementById('customStoreName').value : editStore.value;
-    const payload = { store: storeName || "Unknown", date: editDate.value, total: editTotal.value, photo: currentPhoto };
+    const btn = document.getElementById('saveBtn'); 
+    btn.disabled = true; 
+    status.innerText = "Saving...";
+
+    const storeName = (editStore.value === 'Other') 
+        ? document.getElementById('customStoreName').value 
+        : editStore.value;
+
+    const payload = { 
+        store: storeName || "Unknown", 
+        date: editDate.value, 
+        total: editTotal.value, 
+        photo: currentPhoto 
+    };
+
     try {
-        await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
-        status.innerText = "Success!"; resultArea.style.display = "none"; btn.disabled = false;
-    } catch (e) { status.innerText = "Upload Failed."; btn.disabled = false; }
+        await fetch(GOOGLE_SCRIPT_URL, { 
+            method: 'POST', 
+            mode: 'no-cors', 
+            body: JSON.stringify(payload) 
+        });
+        
+        status.innerText = "Success! Saved.";
+        
+        // NEW: RESET INTERFACE FOR NEXT SCAN
+        resultArea.style.display = "none";
+        video.style.display = "block";   // Show live camera again
+        canvas.style.display = "none";   // Hide the static photo
+        snap.style.display = "block";    // Show the scan button again
+        btn.disabled = false;
+        
+        // Clear custom store name if it was used
+        document.getElementById('customStoreName').value = "";
+        
+    } catch (e) {
+        status.innerText = "Upload Failed.";
+        btn.disabled = false;
+    }
 }
 
 setupCamera();
