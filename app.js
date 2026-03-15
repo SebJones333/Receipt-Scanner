@@ -21,7 +21,7 @@ const BRAND_DATA = {
     "Kroger": { instant: ["KROGER", "PLUS CUSTOMER", "FUEL POINTS", "PLUS CARD"], level1: [], level2: [] },
     "Costco": { instant: ["COSTCO"], level1: ["WHOLESALE", "MEMBER"], level2: [] },
     "Target": { instant: ["TARGET"], level1: ["CIRCLE", "REDCARD"], level2: [] },
-    "Home Depot": { instant: ["HOME DEPOT", "DEPOT", "DOERS", "GET MORE DONE"]], level1: [], level2: [] },
+    "Home Depot": { instant: ["HOME DEPOT", "DEPOT", "DOERS", "GET MORE DONE"], level1: [], level2: [] },
     "Trader Joes": { instant: ["TRADER JOES", "TRADERJOES", "JOE'S"], level1: [], level2: [] },
     "Ace": { instant: ["ACE HARDWARE", "GREAT LAKES ACE"], level1: [], level2: [] }
 };
