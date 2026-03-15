@@ -17,13 +17,13 @@ const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3BhcNWXYfWs
 
 // --- STORE FINGERPRINT DATA ---
 const BRAND_DATA = {
-    "Meijer": { instant: ["MEIJER"], level1: ["MPERKS", "26"], level2: ["1005 E 13 MILE", "MADISON HEIGHTS", "48071", "307-4900"] },
-    "Kroger": { instant: ["KROGER"], level1: ["PLUS CUSTOMER", "FUEL POINTS", "LOW PRICES", "PLUS CARD"], level2: ["2200 E 12 MILE", "2483971520"] },
-    "Costco": { instant: ["COSTCO"], level1: ["WHOLESALE", "MEMBER"], level2: ["393", "30550 STEPHENSON", "48071"] },
-    "Target": { instant: ["TARGET"], level1: ["CIRCLE", "REDCARD"], level2: ["614-9792", "1301 COOLIDGE", "49084"] },
-    "Home Depot": { instant: ["HOME DEPOT", "DEPOT"], level1: ["DOERS", "GET MORE DONE"], level2: ["1177 COOLIDGE", "48084", "816-8001", "660 WEST"] },
-    "Trader Joes": { instant: ["TRADER JOES", "TRADERJOES"], level1: ["JOE'S", "9:00AM", "9:00PM"], level2: ["27880 WOODWARD", "48067", "582-9002"] },
-    "Ace": { instant: ["ACE HARDWARE", "GREAT LAKES ACE"], level1: ["HARDWARE"], level2: ["18086", "541-4904", "515 E. 4TH"] }
+    "Meijer": { instant: ["MEIJER", "MPERKS"], level1: [], level2: [] },
+    "Kroger": { instant: ["KROGER", "PLUS CUSTOMER", "FUEL POINTS", "PLUS CARD"], level1: [], level2: [] },
+    "Costco": { instant: ["COSTCO"], level1: ["WHOLESALE", "MEMBER"], level2: [] },
+    "Target": { instant: ["TARGET"], level1: ["CIRCLE", "REDCARD"], level2: [] },
+    "Home Depot": { instant: ["HOME DEPOT", "DEPOT", "DOERS", "GET MORE DONE"]], level1: [], level2: [] },
+    "Trader Joes": { instant: ["TRADER JOES", "TRADERJOES", "JOE'S"], level1: [], level2: [] },
+    "Ace": { instant: ["ACE HARDWARE", "GREAT LAKES ACE"], level1: [], level2: [] }
 };
 
 // Fuzzy Logic
@@ -150,13 +150,29 @@ snap.addEventListener('click', async () => {
 
 function processSummary(rawText) {
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+    
+    // 1. STORE DETECTION
     editStore.value = autoDetectStore(rawText);
     toggleCustomStore();
 
+    // 2. DATE LOGIC (Windowed Filter: Today - 14 Days)
     const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
-    const todayStr = formatToShortDate(new Date());
+    const now = new Date();
+    const todayStr = formatToShortDate(now);
+    
+    // Set the "Too Old" threshold to 14 days ago
+    const minDate = new Date();
+    minDate.setDate(now.getDate() - 14);
+
     let finalDate = todayStr;
-    badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
+    badgeDefaulted.style.display = "none";
+    badgeToday.style.display = "none";
+
+    // Date Validation Helper
+    const isValidWindow = (dateObj) => {
+        // Must not be in the future, and must not be older than 14 days
+        return dateObj <= now && dateObj >= minDate;
+    };
 
     let foundNearAnchor = false;
     for (let i = 0; i < lines.length; i++) {
@@ -166,7 +182,7 @@ function processSummary(rawText) {
                 if (match) {
                     let normalized = match[0].replace(/\./g, '/').replace(/-/g, '/');
                     let d = new Date(normalized);
-                    if (!isNaN(d.getTime())) {
+                    if (!isNaN(d.getTime()) && isValidWindow(d)) {
                         finalDate = formatToShortDate(d);
                         foundNearAnchor = true;
                         break;
@@ -182,7 +198,7 @@ function processSummary(rawText) {
         if (globalMatch) {
             let normalized = globalMatch[0].replace(/\./g, '/').replace(/-/g, '/');
             let d = new Date(normalized);
-            if (!isNaN(d.getTime())) {
+            if (!isNaN(d.getTime()) && isValidWindow(d)) {
                 finalDate = formatToShortDate(d);
             } else { badgeDefaulted.style.display = "inline"; }
         } else { badgeDefaulted.style.display = "inline"; }
@@ -192,6 +208,7 @@ function processSummary(rawText) {
         badgeToday.style.display = "inline";
     }
 
+    // 3. CONSENSUS TOTAL LOGIC
     let priceCounts = {};
     let candidates = [];
 
@@ -227,7 +244,6 @@ function processSummary(rawText) {
     resultArea.style.display = "block"; 
     status.innerText = "Verify and Save.";
 }
-
 async function uploadToCloud() {
     const btn = document.getElementById('saveBtn'); btn.disabled = true; status.innerText = "Saving...";
     const storeName = (editStore.value === 'Other') ? document.getElementById('customStoreName').value : editStore.value;
