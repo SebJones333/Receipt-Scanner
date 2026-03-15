@@ -150,13 +150,29 @@ snap.addEventListener('click', async () => {
 
 function processSummary(rawText) {
     const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+    
+    // 1. STORE DETECTION
     editStore.value = autoDetectStore(rawText);
     toggleCustomStore();
 
+    // 2. DATE LOGIC (Windowed Filter: Today - 14 Days)
     const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
-    const todayStr = formatToShortDate(new Date());
+    const now = new Date();
+    const todayStr = formatToShortDate(now);
+    
+    // Set the "Too Old" threshold to 14 days ago
+    const minDate = new Date();
+    minDate.setDate(now.getDate() - 14);
+
     let finalDate = todayStr;
-    badgeDefaulted.style.display = "none"; badgeToday.style.display = "none";
+    badgeDefaulted.style.display = "none";
+    badgeToday.style.display = "none";
+
+    // Date Validation Helper
+    const isValidWindow = (dateObj) => {
+        // Must not be in the future, and must not be older than 14 days
+        return dateObj <= now && dateObj >= minDate;
+    };
 
     let foundNearAnchor = false;
     for (let i = 0; i < lines.length; i++) {
@@ -166,7 +182,7 @@ function processSummary(rawText) {
                 if (match) {
                     let normalized = match[0].replace(/\./g, '/').replace(/-/g, '/');
                     let d = new Date(normalized);
-                    if (!isNaN(d.getTime())) {
+                    if (!isNaN(d.getTime()) && isValidWindow(d)) {
                         finalDate = formatToShortDate(d);
                         foundNearAnchor = true;
                         break;
@@ -182,7 +198,7 @@ function processSummary(rawText) {
         if (globalMatch) {
             let normalized = globalMatch[0].replace(/\./g, '/').replace(/-/g, '/');
             let d = new Date(normalized);
-            if (!isNaN(d.getTime())) {
+            if (!isNaN(d.getTime()) && isValidWindow(d)) {
                 finalDate = formatToShortDate(d);
             } else { badgeDefaulted.style.display = "inline"; }
         } else { badgeDefaulted.style.display = "inline"; }
@@ -192,6 +208,7 @@ function processSummary(rawText) {
         badgeToday.style.display = "inline";
     }
 
+    // 3. CONSENSUS TOTAL LOGIC
     let priceCounts = {};
     let candidates = [];
 
